@@ -1,0 +1,23 @@
+{
+  "name": "looklock-core",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ewhachain-LookLock/looklock-core.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Ewhachain-LookLock/looklock-core/issues"
+  },
+  "homepage": "https://github.com/Ewhachain-LookLock/looklock-core#readme",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^1.0.2",
+    "hardhat": "^2.10.1"
+  }
+}
