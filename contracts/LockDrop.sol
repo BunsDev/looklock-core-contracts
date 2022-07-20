@@ -3,11 +3,13 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/uitls/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract Vault {
-    public mapping(uint -> uint) public boost;  //days
-    public mapping(uint -> uint) public canclePercent; 
+    using SafeERC20 for IERC20;
+
+    mapping(uint => uint) public boost;  //days
+    mapping(uint => uint) public canclePercent; 
 
     
     IERC20 public dropToken;
@@ -29,7 +31,6 @@ contract Vault {
     
 
     address public admin;
-    address constant LOLO = "";
     bool public isActive;
 
     struct UserLockInfo {
@@ -42,7 +43,7 @@ contract Vault {
 
     UserLockInfo[] public userLockInfos;
 
-    public mapping(address -> userLockInfos) LockInfo;
+    mapping(address => UserLockInfo[]) public LockInfo;
     address[] public beneficiaries; 
 
 
@@ -51,13 +52,15 @@ contract Vault {
      */
     modifier onlyAdmin {
         require(msg.sender == admin);
+        _;
     }
 
-     modifier onlyBeneficiary {
+     modifier onlyBeneficiery {
         require(isExistingBeneficiary(msg.sender));
+        _;
     }
+
     /**
-    @param _lockToken 락 할 토큰의 주소. 없으면 0 
     @param _totalSupply drop 할 토큰의 총 수량. 
     @param _lockDuration lock 진행할 기간
     @param _boostDays boost할 기준 시간들 (일 기준)
@@ -66,21 +69,19 @@ contract Vault {
     @param _canclePercent cancle percent
     */
     constructor (
-        address _lockToken, 
         uint256 _totalSupply, 
         uint _lockDuration,
+        address LOLO,
 
-        uint [] _boostDays,
-        uint [] _boostNums,
-        uint [] _cancleDays,
-        uint [] _canclePercent
+        uint [] memory _boostDays,
+        uint [] memory _boostNums,
+        uint [] memory _cancleDays,
+        uint [] memory _canclePercent
         
         )
     {
         /// LOLO 토큰은 기본적을 lock 토큰에 포함
         lockTokens.push(IERC20(LOLO));
-
-        setLockAsset(_lockToken);
         totalSupply = _totalSupply;
 
         // 
@@ -108,9 +109,8 @@ contract Vault {
     }
 
     function setLockAsset(address _lockToken) external onlyAdmin {
-        require(!isExistingLockToken(IERC20(lockedToken)), "Already exsits as LockAsset");
-        lockToken = IERC20(_lockToken);
-        lockTokens.push(lockToken);
+        require(!isExistingLockToken(IERC20(_lockToken)), "Already exsits as LockAsset");
+        lockTokens.push(IERC20(_lockToken));
     }
 
     function setDropAsset(address _dropToken) external onlyAdmin {
@@ -118,7 +118,7 @@ contract Vault {
     }
 
     /// initiagte 하기 전에 프로젝트 오너가 vault 에 totalSupply 만큼의 토큰을 transfer 해야 함. (scritpt 단에서 처리)
-    function initiateLock(address _dropToken, uint256 total) isAdmin external onlyAdmin{
+    function initiateLock() external onlyAdmin{
         require(dropToken.balanceOf(address(this)) == totalSupply, 
                 "Not enough dropToken in vault. Need to transfer drop first.");
 
@@ -131,17 +131,17 @@ contract Vault {
         }
     }
 
-    function isExistingLockToken(IERC20 token) returns(bool) {
-        for (uint i; i < lockedTokens.length; i++) {
-            if (lockedTokens[i] == token) {
+    function isExistingLockToken(IERC20 token) internal view returns(bool) {
+        for (uint i=0; i < lockTokens.length; i++) {
+            if (lockTokens[i] == token) {
                 return true;
             }
         }
         return false;
     }
 
-    function isExistingBeneficiary(address addr) internal returns(bool) {
-        for (uint i; i<beneficiaries.length, i++ ) {
+    function isExistingBeneficiary(address addr) internal view returns(bool) {
+        for (uint i=0; i<beneficiaries.length; i++ ) {
             if (beneficiaries[i] == addr) {
                 return true;
             }
@@ -150,24 +150,24 @@ contract Vault {
     }
     
     /// need to approve first (프론트에서 처리)
-    function deposit(uint256 amount, uint lockDurationInDays, address lockedToken, uint256 amount ){
+    function deposit(uint256 amount, uint lockDurationInDays, address lockedToken ) public {
         IERC20 token = IERC20(lockedToken);
         require(msg.sender != admin, "Admin cannot deposit for lockdrop");
         require(isExistingLockToken(token), "Wrong type of Token to lock");
         /// remaining supply 보다 적거나 같은 양이어야 함.
         require(amount <= remainingSupply, "Exceeds remaining supply");
-        require(block.timestamp + lockDurationInDays days < start + lockDuration, "exceeds lock duration");
+        require(block.timestamp + lockDurationInDays * 1 days < start + lockDuration, "exceeds lock duration");
         
         // require(amount < totalSupply - token.balanceOf(address(this)))
-        safeTransferFrom(lockToken, msg.sender, address(this), amount);
+        token.safeTransferFrom(msg.sender, address(this), amount);
         uint length = LockInfo[msg.sender].length;
         LockInfo[msg.sender].push(UserLockInfo(
             length-1, 
             block.timestamp, 
-            block.timestamp + lockDurationInDays days,
+            block.timestamp + lockDurationInDays * 1 days,
             lockedToken,
             amount
-            ))
+            ));
 
         remainingSupply -= amount;
         if(!isExistingBeneficiary(msg.sender)) {
@@ -176,19 +176,20 @@ contract Vault {
     }
 
     /// withdraw only locked token
-    function withdraw(address lockedToken, uint id) onlyBeneficiery{
+    function withdraw(address lockedToken, uint id) public onlyBeneficiery{
         
         IERC20 token = IERC20(lockedToken);
         require(isExistingLockToken(token), "Wrong type of Token to withdraw");
         require(LockInfo[msg.sender].length > id, "Id out of index");
         require(LockInfo[msg.sender][id].amount > 0 , "Nothing to withdraw");
+        
+        uint startTime = LockInfo[msg.sender][id].lockStart;
+        require(block.timestamp - startTime < cancleOption[cancleOption.length -1] * 1 days, "Available cancle date has passed");
+        
+        uint256 amount = 0;
 
-        require(block.timestamp - lockStart < cancleOption[cancleOption.length -1] days, "Available cancle date has passed");
-        uint lockStart = LockInfo[msg.sender][id].lockStart;
-        uint256 amount = 0
-
-        for (uint i; i<cancleOption.length ; i++) {
-            if(block.timestamp - lockStart < cancleOption[i]){
+        for (uint i=0; i<cancleOption.length ; i++) {
+            if(block.timestamp - startTime < cancleOption[i]){
                 amount = LockInfo[msg.sender][id].amount * (canclePercent[cancleOption[i]]/100);
             }
         }
@@ -198,22 +199,22 @@ contract Vault {
     }
 
     /// claim for lockdrop
-    function claim() onlyBeneficiery{
-        uint256 claimableAmount = 0 
-        for (uint i=0; i < lockedTokens.length; i++){
-            IEC20 token = lockedTokens[i];
+    function claim() public onlyBeneficiery{
+        uint256 claimableAmount = 0;
+        for (uint i=0; i < lockTokens.length; i++){
+            IERC20 token = lockTokens[i];
             uint256 withdrawAmount = 0; 
             for ( uint j; j< LockInfo[msg.sender].length; j++ ) {
-                if (block.timestamp < LockInfo[msg.sender][j].endLock){
+                if (block.timestamp < LockInfo[msg.sender][j].lockEnd){
                     continue;
                 }
-                if (LockInfo[msg.sender][j].token == token) {
+                if (IERC20(LockInfo[msg.sender][j].lockedToken) == token) {
                     withdrawAmount += LockInfo[msg.sender][j].amount;
                 }
                 claimableAmount += getEffectiveValue(
                     LockInfo[msg.sender][j].amount,
-                    LockInfo[msg.sender][j].startLock,
-                    LockInfo[msg.sender][j].endLock );
+                    LockInfo[msg.sender][j].lockStart,
+                    LockInfo[msg.sender][j].lockEnd );
             }
 
             if(withdrawAmount >0 ) {
@@ -221,23 +222,23 @@ contract Vault {
             }
         }
         
-        dropToken.transfer(msg.sender, claimableAmount)
+        dropToken.transfer(msg.sender, claimableAmount);
 
     }
     
-    function getEffectiveValue(uint256 amount, uint start, uint end) {
-        uint term = end - start; 
-        uint256 bonus= 100; 
-        for(uint i=0; i<boostOption.length ; i++) {
-            if (term < boosOtption[i] days) {
+    function getEffectiveValue(uint256 amount, uint _start, uint _end) internal view returns(uint256) {
+        uint term = _end - _start; 
+        
+        for(uint i=0; i<boostOption.length; i++) {
+            if (term < boostOption[i] * 1 days) {
                 return amount * boost[boostOption[i]]/100;
             }
-        return amount * boost[boostOption[boosOption.length-1]];
         }
+        return amount * boost[boostOption[boostOption.length-1]]/100;
 
     }
 
-    function closeLock() onlyAdmin {
+    function closeLock() public onlyAdmin {
         require(isActive = true, "Already closed");
         isActive=false;
         dropToken.transfer(msg.sender, dropToken.balanceOf(address(this)));
