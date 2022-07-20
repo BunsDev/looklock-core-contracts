@@ -28,7 +28,6 @@ contract Vault {
     // uint constant TWELVE_MONTHS = 365;
     
 
-
     address public admin;
     address constant LOLO = "";
     bool public isActive;
@@ -48,7 +47,7 @@ contract Vault {
 
 
     /**
-    @dev Admin 권한, Beneficiary 권한 설정 하기. 
+    @dev Admin 권한, Beneficiary 권한 설정. 
      */
     modifier onlyAdmin {
         require(msg.sender == admin);
@@ -57,7 +56,15 @@ contract Vault {
      modifier onlyBeneficiary {
         require(isExistingBeneficiary(msg.sender));
     }
-
+    /**
+    @param _lockToken 락 할 토큰의 주소. 없으면 0 
+    @param _totalSupply drop 할 토큰의 총 수량. 
+    @param _lockDuration lock 진행할 기간
+    @param _boostDays boost할 기준 시간들 (일 기준)
+    @param _boostNums boost percent
+    @param _cancleDays cancle 기준 시간들 (일 기준)
+    @param _canclePercent cancle percent
+    */
     constructor (
         address _lockToken, 
         uint256 _totalSupply, 
@@ -70,10 +77,13 @@ contract Vault {
         
         )
     {
+        /// LOLO 토큰은 기본적을 lock 토큰에 포함
         lockTokens.push(IERC20(LOLO));
 
         setLockAsset(_lockToken);
         totalSupply = _totalSupply;
+
+        // 
         remainingSupply = totalSupply;
         lockDuration = _lockDuration;
 
