@@ -4,11 +4,41 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "./Lolo.sol";
+import "./IVault.sol";
 
-contract Vault {
+contract VaultFactory {
+    Vault[] public VaultArray;
+
+    function CreateNewVault(
+        address LOLO,
+
+        uint8 _lockPeriod,
+        uint8 _depositableDuration,
+        uint8 [] memory _durationOption,
+        uint8 [] memory _boostOption,
+        uint8 [] memory _cancleOption,
+        uint8 [] memory _percent,
+
+        uint256[] memory _allocation) public {
+        
+        Vault vault = new Vault( LOLO, _lockPeriod, _depositableDuration, _durationOption, _boostOption, _cancleOption, _percent, _allocation);
+        VaultArray.push(vault);
+    }
+
+    function getVaults() external view returns (Vault[] memory) {
+        return VaultArray;
+    }
+
+
+}
+
+contract Vault is IVault{
     using SafeERC20 for IERC20;
 
+    //기간 - 부스트
     mapping(uint8 => uint8) public durationBoost; 
+    //취소가능기간 - 환불 퍼센트
     mapping(uint8 => uint8) public canclePercent;  
 
     
@@ -16,12 +46,18 @@ contract Vault {
     IERC20 [] public lockTokens;
     // drop 예정인 총 토큰 양
     uint256 public totalSupply; 
+    // 남은 공급량
     uint256 public remainingSupply; 
+    // 락드랍 진행 기간 ( 일 수) 
     uint256 public lockPeriod;
+    // 락드랍 시작시간
     uint256 public start;
 
+    //취소 가능 기간 리스트
     uint8[] public cancleOption;  ///days
 
+    //입금 가능 기간 = phase 1기간
+    uint8 public depositableDuration;
     address public admin;
     bool public isActive;
 
@@ -75,15 +111,17 @@ contract Vault {
     @param _allocation token allocations per duration
     */
     constructor ( 
-        uint _lockPeriod,
         address LOLO,
 
+        uint8 _lockPeriod,
+        uint8 _depositableDuration,
         uint8 [] memory _durationOption,
         uint8 [] memory _boostOption,
         uint8 [] memory _cancleOption,
         uint8 [] memory _percent,
 
         uint256[] memory _allocation
+
         
         )
     {
@@ -118,6 +156,7 @@ contract Vault {
 
         admin = msg.sender;
         isActive = false;
+        depositableDuration = _depositableDuration;
         
     }
 
@@ -167,10 +206,11 @@ contract Vault {
     }
     
     /// need to approve first (프론트에서 처리)
-    function deposit(uint256 amount, uint8 _duration, address lockedToken ) public {
+    function deposit(uint256 amount, uint8 _duration, address lockedToken ) external {
         IERC20 token = IERC20(lockedToken);
         require(msg.sender != admin, "Admin cannot deposit for lockdrop");
         require(isExistingLockToken(token), "Wrong type of Token to lock");
+        require(block.timestamp < start+ depositableDuration * 1 days, "depositalbe period has passed");
 
         uint8 duration = _duration;
         /// 해당 duration 이 active 해야함
@@ -178,7 +218,7 @@ contract Vault {
         /// remaining supply 보다 적거나 같은 양이어야 함.
         require(Allocation[duration].remain >= amount, "Exceeds remaining supply");
         /// lock할 기간이 전체 프로젝트 기간 이내여야 함. 
-        require(block.timestamp + _duration * 1 days < start + lockPeriod, "exceeds lock duration");
+        require(block.timestamp + _duration * 1 days < start + lockPeriod * 1 days, "exceeds lock duration");
         
         
         token.safeTransferFrom(msg.sender, address(this), amount);
@@ -200,7 +240,7 @@ contract Vault {
     }
 
     /// withdraw only locked token
-    function withdraw(address lockedToken, uint id) public onlyBeneficiery{
+    function withdraw(address lockedToken, uint id) external onlyBeneficiery{
         
         IERC20 token = IERC20(lockedToken);
         require(isExistingLockToken(token), "Wrong type of Token to withdraw");
@@ -224,7 +264,7 @@ contract Vault {
     }
 
     /// claim for lockdrop and unlock the asset. unlock 가능한 asset만 redeem, 나머지는 계속 Lock상태.
-    function claim() public onlyBeneficiery{
+    function claim() external onlyBeneficiery{
         uint256 claimableAmount = 0;
         for (uint i=0; i < lockTokens.length; i++){
             IERC20 token = lockTokens[i];
@@ -262,14 +302,10 @@ contract Vault {
         return Allocation[duration].boost * amount;
     }
 
-    function closeLock() public onlyAdmin {
+    function closeLock() external onlyAdmin {
         require(isActive = true, "Already closed");
         isActive=false;
         dropToken.transfer(msg.sender, dropToken.balanceOf(address(this)));
     }
-
-    /**
-    @TODO 최대 1대1 교환. boost 가 아니라 portion 이어야 할 듯?  +  cliff no need?
-     */ 
     
 }
