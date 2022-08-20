@@ -13,16 +13,28 @@ contract VaultFactory {
     function CreateNewVault(
         address LOLO,
 
-        uint8 _lockPeriod,
-        uint8 _depositableDuration,
-        uint8 [] memory _durationOption,
-        uint8 [] memory _boostOption,
-        uint8 [] memory _cancleOption,
-        uint8 [] memory _percent,
-
-        uint256[] memory _allocation) public {
+        uint8 _phase1Period,
+        address _rewardToken,
+        uint8 [] memory _phase2Periods,
+        uint8 [] memory _withdrawablePercents,
         
-        Vault vault = new Vault( LOLO, _lockPeriod, _depositableDuration, _durationOption, _boostOption, _cancleOption, _percent, _allocation);
+        uint8 [] memory _lockPeriods,
+        uint8 [] memory _multipliers,
+        uint256[] memory _allocations,
+
+        address _admin
+        ) public {
+        
+        Vault vault = new Vault( 
+            LOLO, 
+            _phase1Period, 
+            _rewardToken, 
+            _phase2Periods, 
+            _withdrawablePercents, 
+            _lockPeriods, 
+            _multipliers, 
+            _allocations, 
+            msg.sender);
         VaultArray.push(vault);
     }
 
@@ -33,59 +45,66 @@ contract VaultFactory {
 
 }
 
-contract Vault is IVault{
+contract Vault {
     using SafeERC20 for IERC20;
 
-    //기간 - 부스트
-    mapping(uint8 => uint8) public durationBoost; 
-    //취소가능기간 - 환불 퍼센트
-    mapping(uint8 => uint8) public canclePercent;  
+    /**
+    * Data need to be set when project starts
+    */
+    uint256 public startDate;
+    uint256 public phase1Due;
+    // percent in phase2 period - duedate
+    mapping(uint8 => uint256) public withdrawablePercentPerDue;
+    uint256 public lockStartDate;
+    uint256 public lockDueDate;
+    bool public isActive = false;
 
-    
-    IERC20 public dropToken;
-    IERC20 [] public lockTokens;
-    // drop 예정인 총 토큰 양
-    uint256 public totalSupply; 
-    // 남은 공급량
-    uint256 public remainingSupply; 
-    // 락드랍 진행 기간 ( 일 수) 
-    uint256 public lockPeriod;
-    // 락드랍 시작시간
-    uint256 public start;
+    /**
+    * Data need to be set in constructor
+    */
+    // phase1
+    uint8 public phase1Period;
+    //phase2, withdrawpercent
+    uint8[] public phase2Periods;
+    uint256 public lockPeriod =0;
+    uint8[] public withdrawablePercents;
+    //lockPeriod-boosts
+    mapping(uint8 => uint8) public lockPeriodMultipliers;
 
-    //취소 가능 기간 리스트
-    uint8[] public cancleOption;  ///days
-
-    //입금 가능 기간 = phase 1기간
-    uint8 public depositableDuration;
-    address public admin;
-    bool public isActive;
-
-
-    struct AllocationPerDuration {
+    struct Allocation {
         // Duration duration;
         bool active;
         uint8 boost;
         uint256 allocation;
         uint256 remain;
     }
+    //lockPeriond-Allocation
+    mapping(uint8 => Allocation) private _allocationPerPeriod;
+    uint256 public totalAllocation = 0;
+
+    // reward token Info
+    IERC20 public rewardToken;
+    address public admin;
+
+    /**
+    * Data need to be set in other function;
+    */
+    IERC20 [] public lockTokens;
+    
+
 
     struct UserLockInfo {
-        uint8 id;
-        uint8 duration;
-        uint256 lockStart;
-        uint256 lockEnd;
+        uint256 id;
         uint256 amount;
-        address lockedToken;
+        uint256 unlockAt;
+        bool isWithdrawed;
+        bool isClaimed;
+        IERC20 lockedToken;
     }
 
     address[] public beneficiaries;
-
-    uint8[] public durations;
-    mapping(uint8 => AllocationPerDuration)public Allocation; 
-
-    UserLockInfo[] public userLockInfos;
-    mapping(address => UserLockInfo[]) public LockInfo;
+    // address - (lock period - amount)
+    mapping(address => mapping ( uint8 =>  UserLockInfo[])) public LockInfo;
 
 
     /**
@@ -101,63 +120,43 @@ contract Vault is IVault{
         _;
     }
 
-    /**
-    @param _lockPeriod lock 진행할 기간
-    @param LOLO lolo contract address
-    @param _durationOption duration 기간들 (day)
-    @param _boostOption duration 기간 별 boost 수치
-    @param _cancleOption cancle 기준 시간들 (일 기준)
-    @param _percent cancle percents
-    @param _allocation token allocations per duration
-    */
+    
     constructor ( 
         address LOLO,
 
-        uint8 _lockPeriod,
-        uint8 _depositableDuration,
-        uint8 [] memory _durationOption,
-        uint8 [] memory _boostOption,
-        uint8 [] memory _cancleOption,
-        uint8 [] memory _percent,
-
-        uint256[] memory _allocation
-
+        uint8 _phase1Period,
+        address _rewardToken,
+        uint8 [] memory _phase2Periods,
+        uint8 [] memory _withdrawablePercents,
         
+        uint8 [] memory _lockPeriods,
+        uint8 [] memory _multipliers,
+        uint256[] memory _allocations,
+
+        address _admin
         )
     {
-        //compute total supply
-        totalSupply = 0;
-        for(uint i=0; i < _durationOption.length; i++) {
-            uint8 duration = _durationOption[i];
-            uint8 boost = _boostOption[i];
-            uint256 allocation = _allocation[i];
+        phase1Period = _phase1Period;
+        phase2Periods = _phase2Periods;
+        withdrawablePercents = _withdrawablePercents;
+        
+        for (uint i=0; i< _lockPeriods.length; i++) {
+            Allocation memory allocation = Allocation(
+                true,
+                _multipliers[i],
+                _allocations[i],
+                _allocations[i]
+                );
 
-            durations.push(duration);
-
-            Allocation[duration] = AllocationPerDuration(
-                true, boost, allocation, allocation
-            );
-
-
-            durationBoost[duration] = boost;
-            totalSupply += boost * allocation;
+            _allocationPerPeriod[_lockPeriods[i]] = allocation;
+            totalAllocation +=  _allocations[i];
+            lockPeriod += _lockPeriods[i];
         }
 
-        cancleOption = _cancleOption;
-        for (uint i=0; i<cancleOption.length; i++) {
-            canclePercent[cancleOption[i]] = _percent[i];
-        }
-   
+        rewardToken = IERC20(_rewardToken);
+        admin = _admin;
         /// LOLO 토큰은 기본적을 lock 토큰에 포함
         lockTokens.push(IERC20(LOLO));
-
-        remainingSupply = totalSupply;
-        lockPeriod = _lockPeriod;
-
-        admin = msg.sender;
-        isActive = false;
-        depositableDuration = _depositableDuration;
-        
     }
 
     function setAdmin(address addr) external onlyAdmin {
@@ -169,22 +168,26 @@ contract Vault is IVault{
         lockTokens.push(IERC20(_lockToken));
     }
 
-    function setDropAsset(address _dropToken) external onlyAdmin {
-        dropToken = IERC20(_dropToken);
-    }
-
-    /// initiagte 하기 전에 프로젝트 오너가 vault 에 totalSupply 만큼의 토큰을 transfer 해야 함. (scritpt 단에서 처리)
-    function initiateLock() external onlyAdmin{
-        require(dropToken.balanceOf(address(this)) == totalSupply, 
-                "Not enough dropToken in vault. Need to transfer drop first.");
-
-        if (!isActive) {
-            isActive = true;
-            start = block.timestamp;
+    /// initiagte 하기 전에 프로젝트 오너가 vault 에 totalSupply 만큼의 토큰을 transfer 해야 함
+    function startProject() external onlyAdmin {
+        require(rewardToken.balanceOf((address(this))) == totalAllocation,
+         "Not enough dropToken in vault. Need to transfer drop first.");
+        
+        if (isActive) {
+            revert("Already started project");
         }
-        else {
-            revert("Project is already started");
+        startDate = block.timestamp;
+        phase1Due = block.timestamp + phase1Period * 1 days;
+        uint256 applyPeriod = phase1Period;
+        for (uint i =0; i< phase2Periods.length; i++) {
+            uint256 due = phase2Periods[i] * 1 days + block.timestamp;
+            withdrawablePercentPerDue[withdrawablePercents[i]] = due;
+            applyPeriod += phase2Periods[i];
         }
+        lockStartDate = applyPeriod * 1 days + block.timestamp;
+        lockDueDate = lockStartDate + lockPeriod * 1 days;
+        isActive = true;
+
     }
 
     function isExistingLockToken(IERC20 token) internal view returns(bool) {
@@ -204,108 +207,85 @@ contract Vault is IVault{
         }
         return false;
     }
+
+    event UserDeposit(address user, uint lockInfoId);
     
     /// need to approve first (프론트에서 처리)
-    function deposit(uint256 amount, uint8 _duration, address lockedToken ) external {
+    function deposit(uint256 amount, uint8 _period, IERC20 lockedToken ) external {
         IERC20 token = IERC20(lockedToken);
         require(msg.sender != admin, "Admin cannot deposit for lockdrop");
         require(isExistingLockToken(token), "Wrong type of Token to lock");
-        require(block.timestamp < start+ depositableDuration * 1 days, "depositalbe period has passed");
+        require(block.timestamp < phase1Due, "depositalbe period has passed");
 
-        uint8 duration = _duration;
+        uint8 period = _period;
         /// 해당 duration 이 active 해야함
-        require(Allocation[duration].active, "The Allocation of Duration is full");
+        require(_allocationPerPeriod[period].active, "The Allocation of Duration is full");
         /// remaining supply 보다 적거나 같은 양이어야 함.
-        require(Allocation[duration].remain >= amount, "Exceeds remaining supply");
-        /// lock할 기간이 전체 프로젝트 기간 이내여야 함. 
-        require(block.timestamp + _duration * 1 days < start + lockPeriod * 1 days, "exceeds lock duration");
-        
+        require(_allocationPerPeriod[period].remain >= amount, "Exceeds remaining supply");
         
         token.safeTransferFrom(msg.sender, address(this), amount);
 
-        uint length = LockInfo[msg.sender].length;
-        LockInfo[msg.sender].push(UserLockInfo(
-            uint8(length-1), 
-            duration,
-            block.timestamp, 
-            block.timestamp + _duration * 1 days,
+        uint256 id = LockInfo[msg.sender][period].length -1;
+
+        LockInfo[msg.sender][period].push(UserLockInfo(
+            id, 
             amount,
+            lockStartDate + (period+1)* 1 days,
+            false,
+            false,
             lockedToken
             ));
-
-        Allocation[duration].remain -= amount;
+        
+        _allocationPerPeriod[period].remain -= amount;
         if(!isExistingBeneficiary(msg.sender)) {
             beneficiaries.push(msg.sender);
         }
+        emit UserDeposit(msg.sender, id);
+
     }
 
     /// withdraw only locked token
-    function withdraw(address lockedToken, uint id) external onlyBeneficiery{
+    function withdraw(uint8 period, uint8 id) external onlyBeneficiery{
         
-        IERC20 token = IERC20(lockedToken);
-        require(isExistingLockToken(token), "Wrong type of Token to withdraw");
-        require(LockInfo[msg.sender].length > id, "Id out of index");
-        require(LockInfo[msg.sender][id].amount > 0 , "Nothing to withdraw");
-        
-        uint startTime = LockInfo[msg.sender][id].lockStart;
-        require(block.timestamp - startTime < cancleOption[cancleOption.length -1] * 1 days, "Available cancle date has passed");
-        
-        uint256 amount = 0;
+        require(LockInfo[msg.sender][period].length > id, "Id out of index");
+        require(! LockInfo[msg.sender][period][id].isWithdrawed , "Already withdrawed");
+        require(block.timestamp < lockStartDate, "Lock has started. Cannot withdraw");
+        UserLockInfo storage lock = LockInfo[msg.sender][period][id];
+        uint256 percent = 100;
 
-        for (uint i=0; i<cancleOption.length ; i++) {
-            if(block.timestamp - startTime < cancleOption[i]){
-                amount = LockInfo[msg.sender][id].amount * (canclePercent[cancleOption[i]]/100);
+        for (uint i=0; i<withdrawablePercents.length ; i++) {
+            if(block.timestamp <= phase1Due) break;
+            if(block.timestamp <= withdrawablePercentPerDue[withdrawablePercents[i]]){
+                percent = withdrawablePercents[i];
                 break;
             }
         }
-        token.transfer(msg.sender, amount);
-        /// set lock info amoutn to 0
-        LockInfo[msg.sender][id].amount = 0;
+        uint256 amount = lock.amount * (percent/100);
+        lock.lockedToken.transfer(msg.sender, amount);
+        /// set lock info withdrawed true
+        lock.isWithdrawed = true;
+        
     }
 
-    /// claim for lockdrop and unlock the asset. unlock 가능한 asset만 redeem, 나머지는 계속 Lock상태.
-    function claim() external onlyBeneficiery{
-        uint256 claimableAmount = 0;
-        for (uint i=0; i < lockTokens.length; i++){
-            IERC20 token = lockTokens[i];
-            uint256 unlockAmount = 0; 
-            for ( uint j; j< LockInfo[msg.sender].length; j++ ) {
-                /// lock이 끝나지 않은 토큰은 제외
-                if (block.timestamp < LockInfo[msg.sender][j].lockEnd){
-                    continue;
-                }
-                // unlock the token
-                uint256 amount = LockInfo[msg.sender][j].amount;
-                if (IERC20(LockInfo[msg.sender][j].lockedToken) == token) {
-                    unlockAmount += amount;
-                    LockInfo[msg.sender][j].amount = 0;
-                }
-                // unlock 된 asset 기반으로 claim할 amount 계산
-                claimableAmount += getEffectiveValue(
-                    amount,
-                    LockInfo[msg.sender][j].duration
-                    );
-            }
-
-            if(unlockAmount >0 ) {
-                token.transfer(msg.sender, unlockAmount);
-            }
-        }
-        if (claimableAmount > 0 ) {
-            dropToken.transfer(msg.sender, claimableAmount);
-        }
-
+    function claim(uint8 period, uint8 id) external onlyBeneficiery{
+        require( block.timestamp > LockInfo[msg.sender][period][id].unlockAt, "Cannot claim yet");
+        require(LockInfo[msg.sender][period][id].isWithdrawed == false, "Already withdrawed");
+        require(LockInfo[msg.sender][period][id].isClaimed == false, "Already claimed");
+        UserLockInfo storage lock = LockInfo[msg.sender][period][id];
+        uint256 amount = getEffectiveValue(lock.amount, period);
+        lock.lockedToken.transfer(msg.sender, amount);
+        lock.isClaimed = true;
     }
     
-    function getEffectiveValue(uint256 amount, uint8 duration) internal view returns(uint256) {
+    function getEffectiveValue(uint256 _amount, uint8 _period) internal view returns(uint256) {
 
-        return Allocation[duration].boost * amount;
+        return _allocationPerPeriod[_period].boost * _amount;
     }
 
     function closeLock() external onlyAdmin {
         require(isActive = true, "Already closed");
         isActive=false;
-        dropToken.transfer(msg.sender, dropToken.balanceOf(address(this)));
+        rewardToken.transfer(msg.sender, rewardToken.balanceOf(address(this)));
     }
     
 }

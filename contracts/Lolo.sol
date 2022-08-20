@@ -33,4 +33,8 @@ contract Lolo is ERC20, Ownable, ILolo {
         _transferOwnership(newOwner);
     }
 
+    function swapForTest(uint amount)external {
+        _mint(msg.sender, amount);
+    }
+
 }
