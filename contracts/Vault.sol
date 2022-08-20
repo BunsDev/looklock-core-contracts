@@ -272,6 +272,7 @@ contract Vault is IVault{
         UserLockInfo storage lock = LockInfo[msg.sender][period][id];
         uint256 amount = getEffectiveValue(lock.amount, period);
         lock.lockedToken.transfer(msg.sender, amount);
+        rewardToken.transfer(msg.sender, amount);
         lock.isClaimed = true;
     }
     
