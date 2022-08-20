@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./Lolo.sol";
 import "./IVault.sol";
 
-contract VaultFactory {
+contract VaultFactory{
     Vault[] public VaultArray;
 
     function CreateNewVault(
@@ -20,9 +20,7 @@ contract VaultFactory {
         
         uint8 [] memory _lockPeriods,
         uint8 [] memory _multipliers,
-        uint256[] memory _allocations,
-
-        address _admin
+        uint256[] memory _allocations
         ) public {
         
         Vault vault = new Vault( 
@@ -45,7 +43,7 @@ contract VaultFactory {
 
 }
 
-contract Vault {
+contract Vault is IVault{
     using SafeERC20 for IERC20;
 
     /**
@@ -245,7 +243,7 @@ contract Vault {
     }
 
     /// withdraw only locked token
-    function withdraw(uint8 period, uint8 id) external onlyBeneficiery{
+    function withdraw(uint8 period, uint id) external onlyBeneficiery{
         
         require(LockInfo[msg.sender][period].length > id, "Id out of index");
         require(! LockInfo[msg.sender][period][id].isWithdrawed , "Already withdrawed");
@@ -267,7 +265,7 @@ contract Vault {
         
     }
 
-    function claim(uint8 period, uint8 id) external onlyBeneficiery{
+    function claim(uint8 period, uint id) external onlyBeneficiery{
         require( block.timestamp > LockInfo[msg.sender][period][id].unlockAt, "Cannot claim yet");
         require(LockInfo[msg.sender][period][id].isWithdrawed == false, "Already withdrawed");
         require(LockInfo[msg.sender][period][id].isClaimed == false, "Already claimed");
